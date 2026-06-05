@@ -53,23 +53,19 @@ def search_humhub(query):
 
     for doc, meta in zip(docs, metas):
         wiki_page = meta.get("wiki_page", "unknown")
-        pdf_url = meta.get("pdf_url", "unknown")
 
         sources.append(wiki_page)
 
-        context_parts.append(
-            f"""
+        context_parts.append(f"""
 SOURCE: {wiki_page}
-PDF: {pdf_url}
 
 CONTENT:
 {doc}
-"""
-        )
+""")
 
     context = "\n\n".join(context_parts)
 
-    return context, sources
+    return context, list(set(sources))
 
 from fastapi import FastAPI
 from pydantic import BaseModel
