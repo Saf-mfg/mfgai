@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+chromadb
+pdfplumber
+beautifulsoup4
+playwright
+google-genai
+python-dotenv
