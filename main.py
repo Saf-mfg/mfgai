@@ -15,7 +15,7 @@ def safe_generate_content(prompt, retries=3):
     for i in range(retries):
         try:
             return client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 contents=prompt
             )
 
