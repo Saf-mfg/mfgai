@@ -34,7 +34,7 @@ class Question(BaseModel):
 def safe_generate_content(prompt, sources=None):
     try:
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-1.5-flash-002",
             contents=prompt
         )
 
