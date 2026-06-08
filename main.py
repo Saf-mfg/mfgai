@@ -9,22 +9,25 @@ chat_history = {}
 
 from rag_db import collection
 
-def safe_generate_content(prompt, retries=3):
-    last_error = None
+def safe_generate_content(prompt, sources=None):
+    try:
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
 
-    for i in range(retries):
-        try:
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-except Exception as e:
-    return {
-        "answer": "AI temporarily unavailable. Try again shortly.",
-        "sources": sources
-    }
+        return {
+            "answer": response.text,
+            "sources": sources or []
+        }
 
-    return None
+    except Exception as e:
+        print("AI ERROR:", repr(e))
+
+        return {
+            "answer": "AI temporarily unavailable. Try again shortly.",
+            "sources": sources
+        }
 
 def clean_source(url: str):
     try:
