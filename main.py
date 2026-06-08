@@ -45,7 +45,7 @@ class Question(BaseModel):
 def safe_generate_content(prompt, sources=None):
     try:
         response = client.models.generate_content(
-            model="gemini-flash-latest",
+            model="gemini-2.5-flash",
             contents=prompt
         )
 
@@ -191,7 +191,15 @@ At the end, list sources exactly as provided:
         chat_history[session_id] = history[-10:]
 
         # format sources
-        unique_sources = list(dict.fromkeys(sources))
+        
+        unique_sources = []
+        seen = set()
+
+        for s in sources:
+            url = s.get("url")
+            if url and url not in seen:
+                seen.add(url)
+                unique_sources.append(s)
 
         clean_sources = [
             {
