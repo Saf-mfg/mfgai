@@ -107,6 +107,7 @@ CONTENT:
 @app.post("/ask")
 def ask(data: Question):
     try:
+        print("API KEY LOADED:", os.getenv("GEMINI_API_KEY") is not None)
         session_id = data.session_id
 
         # get history
