@@ -117,7 +117,8 @@ def search_humhub(query):
     # 🔥 final safety trim (prevents Gemini cutoff)
     context = context[:4000]
 
-    return context, list(set(sources))
+    # DO NOT use set() on dicts
+    return context, sources
 
 # -------------------------------
 # MAIN ENDPOINT
@@ -178,8 +179,12 @@ INSTRUCTIONS:
 
 ---
 
-At the end, list sources exactly as provided:
-{sources}
+At the end of your answer, include a "Sources" section.
+
+Format like this:
+
+Sources:
+- title: url
 """
 
         # generate
@@ -204,7 +209,7 @@ At the end, list sources exactly as provided:
         clean_sources = [
             {
                 "title": clean_source(url),
-                "url": url
+                "url": f'<a href="{url}" target="_blank">{url}</a>'
             }
             for url in unique_sources
         ]
@@ -214,8 +219,11 @@ At the end, list sources exactly as provided:
             "sources": clean_sources
         }
 
+    import traceback
+    
     except Exception as e:
         print("🔥 ERROR IN /ask:", repr(e))
+        traceback.print_exc()
         return {
             "answer": "Internal server error",
             "sources": []
