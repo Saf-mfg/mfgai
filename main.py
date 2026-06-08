@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os
 from urllib.parse import urlparse
+import traceback
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -137,9 +138,6 @@ def ask(data: Question):
 
         history_text = "\n".join(history)
 
-        # clean source list for prompt
-        source_block = "\n".join(sources)
-
         # prompt
         prompt = f"""
 You are a strict internal company assistant for HumHub.
@@ -208,18 +206,16 @@ Sources:
 
         clean_sources = [
             {
-                "title": clean_source(url),
-                "url": f'<a href="{url}" target="_blank">{url}</a>'
+                "title": s["title"],
+                "url": s["url"]
             }
-            for url in unique_sources
+            for s in unique_sources
         ]
 
         return {
             "answer": ai_response["answer"],
             "sources": clean_sources
         }
-
-    import traceback
     
     except Exception as e:
         print("🔥 ERROR IN /ask:", repr(e))
