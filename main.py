@@ -41,6 +41,7 @@ def search_humhub(query):
         n_results=5,
         include=["documents", "metadatas"]
     )
+    print("RESULTS:", results)
 
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
