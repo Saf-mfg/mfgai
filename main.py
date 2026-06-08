@@ -85,30 +85,34 @@ def search_humhub(query):
 
     print("RESULTS:", results)
 
-    docs = results.get("documents", [])
-    metas = results.get("metadatas", [])
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
 
-    if not docs or not docs[0]:
+    if not docs:
         return "No relevant context found.", []
-
-    docs = docs[0]
-    metas = metas[0] if metas else []
 
     context_parts = []
     sources = []
 
-    for doc, meta in zip(docs, metas):
+    MAX_DOCS = 3  # 🔥 limit chunks (important fix)
+    MAX_CHARS_PER_DOC = 1200
+
+    for doc, meta in zip(docs[:MAX_DOCS], metas[:MAX_DOCS]):
         wiki_page = meta.get("wiki_page", "unknown")
+
         sources.append(wiki_page)
 
-        context_parts.append(f"""
-SOURCE: {wiki_page}
+        # 🔥 trim each document
+        doc = doc[:MAX_CHARS_PER_DOC]
 
-CONTENT:
-{doc}
-""")
+        context_parts.append(
+            f"SOURCE: {wiki_page}\nCONTENT:\n{doc}"
+        )
 
-    context = "\n\n".join(context_parts)
+    context = "\n\n---\n\n".join(context_parts)
+
+    # 🔥 final safety trim (prevents Gemini cutoff)
+    context = context[:4000]
 
     return context, list(set(sources))
 
