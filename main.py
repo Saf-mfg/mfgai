@@ -100,7 +100,10 @@ def search_humhub(query):
     for doc, meta in zip(docs[:MAX_DOCS], metas[:MAX_DOCS]):
         wiki_page = meta.get("wiki_page", "unknown")
 
-        sources.append(wiki_page)
+        sources.append({
+            "title": clean_source(wiki_page),
+            "url": wiki_page
+        })
 
         # 🔥 trim each document
         doc = doc[:MAX_CHARS_PER_DOC]
