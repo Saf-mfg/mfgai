@@ -174,15 +174,9 @@ INSTRUCTIONS:
 - Be concise and professional
 - If context is unrelated, say you cannot find relevant information
 - Do NOT mention missing topics like "mileage" unless asked
-
+- Do NOT include a Sources section
+- Do NOT list URLs
 ---
-
-At the end of your answer, include a "Sources" section.
-
-Format like this:
-
-Sources:
-- title: url
 """
 
         # generate
