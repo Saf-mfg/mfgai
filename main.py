@@ -14,15 +14,15 @@ def safe_generate_content(prompt, retries=3):
 
     for i in range(retries):
         try:
-            return client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt
-            )
-
-        except Exception as e:
-            last_error = e
-            print(f"⚠️ Gemini retry {i+1} failed:", repr(e))
-            time.sleep(1.5)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+except Exception as e:
+    return {
+        "answer": "AI temporarily unavailable. Try again shortly.",
+        "sources": sources
+    }
 
     return None
 
