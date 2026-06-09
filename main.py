@@ -90,12 +90,15 @@ def search_humhub(query):
     metas = results.get("metadatas", [[]])[0]
 
     if not docs:
-        return "No relevant context found.", []
+        return "No relevant context found.", [], ""
+
+    # FIRST RESULT = BEST MATCH
+    top_doc = docs[0]
 
     context_parts = []
     sources = []
 
-    MAX_DOCS = 3  # 🔥 limit chunks (important fix)
+    MAX_DOCS = 3
     MAX_CHARS_PER_DOC = 1200
 
     for doc, meta in zip(docs[:MAX_DOCS], metas[:MAX_DOCS]):
@@ -106,7 +109,6 @@ def search_humhub(query):
             "url": wiki_page
         })
 
-        # 🔥 trim each document
         doc = doc[:MAX_CHARS_PER_DOC]
 
         context_parts.append(
@@ -114,12 +116,36 @@ def search_humhub(query):
         )
 
     context = "\n\n---\n\n".join(context_parts)
-
-    # 🔥 final safety trim (prevents Gemini cutoff)
     context = context[:4000]
 
-    # DO NOT use set() on dicts
-    return context, sources
+    return context, sources, top_doc
+
+
+# -------------------------------
+# SIMPLE QUESTION DETECTOR
+# -------------------------------
+def is_simple_question(question):
+    q = question.lower()
+
+    keywords = [
+        "what is",
+        "how long",
+        "how many",
+        "when does",
+        "when can",
+        "who is",
+        "where is",
+        "maternity",
+        "paternity",
+        "harassment",
+        "bullying",
+        "holiday",
+        "leave",
+        "absence",
+        "sickness"
+    ]
+
+    return any(k in q for k in keywords)
 
 # -------------------------------
 # MAIN ENDPOINT
@@ -134,7 +160,12 @@ def ask(data: Question):
         history = chat_history.get(session_id, [])
 
         # RAG
-        context, sources = search_humhub(data.question)
+        context, sources, top_doc = search_humhub(data.question)
+        if is_simple_question(data.question):
+            return {
+                "answer": top_doc[:1000],
+                "sources": sources
+            }
 
         history_text = "\n".join(history)
 
