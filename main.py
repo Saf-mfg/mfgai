@@ -170,101 +170,96 @@ def is_simple_question(question):
 # -------------------------------
 # MAIN ENDPOINT
 # -------------------------------
+import traceback
+
 @app.post("/ask")
 def ask(data: Question):
     try:
         print("API KEY LOADED:", os.getenv("GEMINI_API_KEY") is not None)
-        session_id = data.session_id
 
-        # get history
+        session_id = data.session_id
         history = chat_history.get(session_id, [])
 
+        # -------------------------------
         # RAG
-        context, sources, top_doc = search_humhub(data.question)
+        # -------------------------------
+        context, sources = search_humhub(data.question)
+
+        # -------------------------------
+        # SIMPLE MODE (NO GEMINI)
+        # -------------------------------
         if is_simple_question(data.question):
             return {
-                "answer": top_doc[:1000],
+                "answer": context[:1500],
                 "sources": sources
             }
 
         history_text = "\n".join(history)
 
-        # prompt
+        # -------------------------------
+        # PROMPT
+        # -------------------------------
         prompt = f"""
-You are a strict internal company assistant for HumHub.
+You are a strict internal company assistant for HumHub. 
 
 You MUST follow these rules:
 
-1. ONLY use the provided context below.
-2. If the context does not contain the answer, say:
-   "I could not find relevant information in the company policies."
-
-3. NEVER guess or use outside knowledge.
-4. NEVER change the topic.
+1. ONLY use the provided context below. 
+2. If the context does not contain the answer, say: "I could not find relevant information in the company policies." 
+3. NEVER guess or use outside knowledge. 
+4. NEVER change the topic. 
 5. NEVER mention unrelated topics.
-
----
 
 CONTEXT:
 {context}
 
----
-
 CHAT HISTORY:
 {history_text}
-
----
 
 USER QUESTION:
 {data.question}
 
----
-
-INSTRUCTIONS:
-- Answer ONLY using CONTEXT above
-- Be concise and professional
-- If context is unrelated, say you cannot find relevant information
-- Do NOT mention missing topics like "mileage" unless asked
-- Do NOT include a Sources section
+INSTRUCTIONS: 
+- Answer ONLY using CONTEXT above 
+- Be concise and professional 
+- If context is unrelated, say you cannot find relevant information 
+- Do NOT mention missing topics like "mileage" unless asked 
+- Do NOT include a Sources section 
 - Do NOT list URLs
----
 """
 
-        # generate
+        # -------------------------------
+        # GEMINI CALL
+        # -------------------------------
         ai_response = safe_generate_content(prompt, sources)
 
-        # update memory
+        # -------------------------------
+        # MEMORY
+        # -------------------------------
         history.append(f"User: {data.question}")
         history.append(f"AI: {ai_response['answer']}")
         chat_history[session_id] = history[-10:]
 
-        # format sources
-        
-        unique_sources = []
-        seen = set()
-
-        for s in sources:
-            url = s.get("url")
-            if url and url not in seen:
-                seen.add(url)
-                unique_sources.append(s)
-
+        # -------------------------------
+        # CLEAN SOURCES
+        # -------------------------------
         clean_sources = [
             {
                 "title": s["title"],
                 "url": s["url"]
             }
-            for s in unique_sources
+            for s in sources
         ]
 
         return {
             "answer": ai_response["answer"],
             "sources": clean_sources
         }
-    
+
     except Exception as e:
         print("🔥 ERROR IN /ask:", repr(e))
         traceback.print_exc()
+
         return {
             "answer": "Internal server error",
             "sources": []
