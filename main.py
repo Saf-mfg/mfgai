@@ -39,7 +39,6 @@ class Question(BaseModel):
     session_id: str
     question: str
 
-
 # -------------------------------
 # GEMINI CALL
 # -------------------------------
@@ -62,7 +61,6 @@ def safe_generate_content(prompt, sources=None):
             "sources": sources or []
         }
 
-
 # -------------------------------
 # CLEAN SOURCE TITLE
 # -------------------------------
@@ -74,26 +72,43 @@ def clean_source(url: str):
     except:
         return url
 
-
 # -------------------------------
 # PICK BEST DOC
 # -------------------------------
 def pick_best_doc(docs, query):
-    query_words = set(query.lower().split())
+    q_words = set(query.lower().split())
 
     def score(doc):
         doc_lower = doc.lower()
-        return sum(1 for w in query_words if w in doc_lower)
+        return sum(1 for w in q_words if w in doc_lower)
 
     return max(docs, key=score)
 
-def is_answerable_from_chunk(doc, question):
+# -------------------------------
+# RETRIEVAL SCORE (FIXED)
+# -------------------------------
+def retrieval_score(docs, query):
+    if not docs:
+        return 0
+
+    q_words = set(query.lower().split())
+    best_doc = max(docs, key=len).lower()
+
+    return sum(1 for w in q_words if w in best_doc)
+
+# -------------------------------
+# DIRECT ANSWER (NO GEMINI)
+# -------------------------------
+def build_direct_answer(question, top_doc):
+    sentences = top_doc.split(".")
+
     q_words = set(question.lower().split())
-    doc_lower = doc.lower()
 
-    matches = sum(1 for w in q_words if w in doc_lower)
+    for s in sentences:
+        if any(w in s.lower() for w in q_words):
+            return s.strip()
 
-    return matches >= 2
+    return sentences[0].strip() if sentences else top_doc
 
 # -------------------------------
 # RAG SEARCH
@@ -141,33 +156,28 @@ def ask(data: Question):
     try:
         session_id = data.session_id
         question = data.question
+
         history = chat_history.get(session_id, [])
 
-        context, sources, top_doc = search_humhub(question)
+        # -------------------------------
+        # RAG
+        # -------------------------------
+        context, sources, top_doc, score = search_humhub(question)
 
-        # 🚨 PURE CHROMA MODE (NO GEMINI)
-        if is_answerable_from_chunk(top_doc, question):
+        # -------------------------------
+        # 🚀 NO GEMINI IF STRONG MATCH
+        # -------------------------------
+        GEMINI_THRESHOLD = 3
+
+        if score >= GEMINI_THRESHOLD:
             return {
-                "answer": top_doc[:1200],
+                "answer": build_direct_answer(question, top_doc),
                 "sources": sources
             }
 
-        # 🤖 ONLY HERE DO YOU CALL GEMINI
-
         # -------------------------------
-        # 🚀 DECISION ENGINE (CORE FIX)
+        # 🤖 GEMINI FALLBACK ONLY
         # -------------------------------
-
-        USE_GEMINI_THRESHOLD = 3
-
-        # CASE 1: Strong match → NO GEMINI
-        if score >= USE_GEMINI_THRESHOLD:
-            return {
-                "answer": top_doc[:1200],
-                "sources": sources
-            }
-
-        # CASE 2: Weak match → GEMINI
         history_text = "\n".join(history)
 
         prompt = f"""
@@ -175,7 +185,8 @@ You are a strict internal company assistant.
 
 RULES:
 - ONLY use provided context
-- If answer not in context say: "I could not find relevant information in the company policies."
+- If answer not in context say:
+  "I could not find relevant information in the company policies."
 
 CONTEXT:
 {context}
