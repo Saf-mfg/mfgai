@@ -75,6 +75,19 @@ def clean_source(url: str):
         return url
 
 # -------------------------------
+# HELPERS (put these near top)
+# -------------------------------
+
+def pick_best_doc(docs, query):
+    query_words = set(query.lower().split())
+
+    def score(doc):
+        doc_lower = doc.lower()
+        return sum(1 for w in query_words if w in doc_lower)
+
+    return max(docs, key=score)
+
+# -------------------------------
 # RAG SEARCH
 # -------------------------------
 def search_humhub(query):
@@ -93,7 +106,7 @@ def search_humhub(query):
         return "No relevant context found.", [], ""
 
     # FIRST RESULT = BEST MATCH
-    top_doc = max(docs, key=len)
+    top_doc = pick_best_doc(docs, data.question)
 
     context_parts = []
     sources = []
