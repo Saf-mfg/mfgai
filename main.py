@@ -142,7 +142,14 @@ def is_simple_question(question):
         "holiday",
         "leave",
         "absence",
-        "sickness"
+        "sickness",
+        "bereavement",
+        "phishing",
+        "aml",
+        "anti money laundering",
+        "policy",
+        "entitled",
+        "allowance"
     ]
 
     return any(k in q for k in keywords)
