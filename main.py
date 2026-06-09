@@ -96,6 +96,24 @@ def retrieval_score(docs, query):
 
     return sum(1 for w in q_words if w in best_doc)
 
+#-----------------------------
+# RETRIEVAL CONFIDENCE
+# ----------------------------
+
+def retrieval_confidence(docs, query):
+    """
+    Simple confidence score:
+    how many query words appear in retrieved chunks
+    """
+    q_words = set(query.lower().split())
+
+    combined = " ".join(docs).lower()
+
+    if not combined.strip():
+        return 0
+
+    return sum(1 for w in q_words if w in combined)
+
 # -------------------------------
 # DIRECT ANSWER (NO GEMINI)
 # -------------------------------
@@ -127,7 +145,6 @@ def search_humhub(query):
         return "", [], "", 0
 
     top_doc = pick_best_doc(docs, query)
-    score = retrieval_score(docs, query)
 
     context_parts = []
     sources = []
@@ -146,6 +163,8 @@ def search_humhub(query):
 
     context = "\n\n---\n\n".join(context_parts)[:4000]
 
+    score = retrieval_confidence(docs, query)
+
     return context, sources, top_doc, score
 
 # -------------------------------
@@ -156,48 +175,46 @@ def ask(data: Question):
     try:
         session_id = data.session_id
         question = data.question
-
         history = chat_history.get(session_id, [])
 
-        # -------------------------------
-        # RAG
-        # -------------------------------
         context, sources, top_doc, score = search_humhub(question)
 
         # -------------------------------
-        # 🚀 NO GEMINI IF STRONG MATCH
+        # 🚀 LEVEL 1: NO GEMINI (HIGH CONFIDENCE)
         # -------------------------------
-        GEMINI_THRESHOLD = 3
+        if score >= 3:
+            return {
+                "answer": top_doc[:1200],
+                "sources": sources
+            }
 
-        if score >= GEMINI_THRESHOLD:
+        # -------------------------------
+        # 🚀 LEVEL 2: STILL NO GEMINI (DIRECT EXTRACTION)
+        # -------------------------------
+        if score >= 1 and len(top_doc) > 50:
             return {
                 "answer": build_direct_answer(question, top_doc),
                 "sources": sources
             }
 
         # -------------------------------
-        # 🤖 GEMINI FALLBACK ONLY
+        # 🚀 LEVEL 3: ONLY NOW CALL GEMINI
         # -------------------------------
         history_text = "\n".join(history)
 
         prompt = f"""
-You are a strict internal company assistant.
+You are a strict internal assistant.
 
-RULES:
-- ONLY use provided context
-- If answer not in context say:
-  "I could not find relevant information in the company policies."
+ONLY use context.
 
 CONTEXT:
 {context}
 
-CHAT HISTORY:
-{history_text}
-
 QUESTION:
 {question}
 
-Answer clearly and concisely.
+If answer not in context say:
+"I could not find relevant information in the company policies."
 """
 
         ai_response = safe_generate_content(prompt, sources)
