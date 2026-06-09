@@ -71,8 +71,49 @@ def clean_source(url: str):
         return url
 
 
-def pick_best_doc(docs, query):
+def pick_best_doc(docs, metas, query):
+
     q_words = set(query.lower().split())
+
+    policy_scores = {}
+
+    for doc, meta in zip(docs, metas):
+
+        title = meta.get("policy_title", "")
+
+        score = 0
+
+        for word in q_words:
+            if word in title.lower():
+                score += 50
+
+        for word in q_words:
+            if word in doc.lower():
+                score += 1
+
+        policy_scores.setdefault(title, 0)
+        policy_scores[title] += score
+
+    best_policy = max(policy_scores, key=policy_scores.get)
+
+    best_doc = None
+    best_doc_score = -1
+
+    for doc, meta in zip(docs, metas):
+
+        if meta.get("policy_title") != best_policy:
+            continue
+
+        score = sum(
+            1 for w in q_words
+            if w in doc.lower()
+        )
+
+        if score > best_doc_score:
+            best_doc_score = score
+            best_doc = doc
+
+    return best_doc
 
     def score(doc):
         doc_lower = doc.lower()
@@ -127,7 +168,7 @@ def build_answer_from_chunks(question, doc):
 def search_humhub(query):
     results = collection.query(
         query_texts=[query],
-        n_results=5,
+        n_results=30,
         include=["documents", "metadatas"]
     )
 
