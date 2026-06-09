@@ -12,7 +12,7 @@ from rag_db import collection
 load_dotenv()
 
 # -------------------------------
-# CLIENT + APP
+# APP + CLIENT
 # -------------------------------
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 app = FastAPI()
@@ -28,7 +28,7 @@ app.add_middleware(
 )
 
 # -------------------------------
-# MEMORY STORE
+# MEMORY
 # -------------------------------
 chat_history = {}
 
@@ -48,12 +48,10 @@ def safe_generate_content(prompt, sources=None):
             model="gemini-2.5-flash",
             contents=prompt
         )
-
         return {
             "answer": response.text,
             "sources": sources or []
         }
-
     except Exception as e:
         print("🔥 GEMINI ERROR:", repr(e))
         return {
@@ -62,7 +60,7 @@ def safe_generate_content(prompt, sources=None):
         }
 
 # -------------------------------
-# CLEAN SOURCE TITLE
+# HELPERS
 # -------------------------------
 def clean_source(url: str):
     try:
@@ -72,9 +70,7 @@ def clean_source(url: str):
     except:
         return url
 
-# -------------------------------
-# PICK BEST DOC
-# -------------------------------
+
 def pick_best_doc(docs, query):
     q_words = set(query.lower().split())
 
@@ -84,29 +80,9 @@ def pick_best_doc(docs, query):
 
     return max(docs, key=score)
 
-# -------------------------------
-# RETRIEVAL SCORE (FIXED)
-# -------------------------------
-def retrieval_score(docs, query):
-    if not docs:
-        return 0
-
-    q_words = set(query.lower().split())
-    best_doc = max(docs, key=len).lower()
-
-    return sum(1 for w in q_words if w in best_doc)
-
-#-----------------------------
-# RETRIEVAL CONFIDENCE
-# ----------------------------
 
 def retrieval_confidence(docs, query):
-    """
-    Simple confidence score:
-    how many query words appear in retrieved chunks
-    """
     q_words = set(query.lower().split())
-
     combined = " ".join(docs).lower()
 
     if not combined.strip():
@@ -117,16 +93,33 @@ def retrieval_confidence(docs, query):
 # -------------------------------
 # DIRECT ANSWER (NO GEMINI)
 # -------------------------------
-def build_direct_answer(question, top_doc):
-    sentences = top_doc.split(".")
-
+def build_direct_answer(question, doc):
+    sentences = doc.split(".")
     q_words = set(question.lower().split())
 
     for s in sentences:
-        if any(w in s.lower() for w in q_words):
-            return s.strip()
+        if any(w in s.lower() for w in q_words) and len(s.strip()) > 20:
+            return s.strip() + "."
 
-    return sentences[0].strip() if sentences else top_doc
+    return sentences[0].strip() if sentences else doc
+
+# -------------------------------
+# STRONG ANSWER BUILDER
+# -------------------------------
+def build_answer_from_chunks(question, doc):
+    sentences = doc.split(".")
+    q_words = set(question.lower().split())
+
+    best = max(
+        sentences,
+        key=lambda s: sum(w in s.lower() for w in q_words),
+        default=doc
+    )
+
+    if len(best.strip()) > 20:
+        return best.strip() + "."
+
+    return doc[:800]
 
 # -------------------------------
 # RAG SEARCH
@@ -162,7 +155,6 @@ def search_humhub(query):
         )
 
     context = "\n\n---\n\n".join(context_parts)[:4000]
-
     score = retrieval_confidence(docs, query)
 
     return context, sources, top_doc, score
@@ -173,48 +165,50 @@ def search_humhub(query):
 @app.post("/ask")
 def ask(data: Question):
     try:
-        session_id = data.session_id
         question = data.question
+        session_id = data.session_id
+
         history = chat_history.get(session_id, [])
 
+        # -------------------------------
+        # RAG
+        # -------------------------------
         context, sources, top_doc, score = search_humhub(question)
 
         # -------------------------------
-        # 🚀 LEVEL 1: NO GEMINI (HIGH CONFIDENCE)
+        # LEVEL 1: STRONG MATCH (NO GEMINI)
         # -------------------------------
-        if score >= 3:
+        if score >= 5:
             return {
-                "answer": top_doc[:1200],
+                "answer": build_answer_from_chunks(question, top_doc),
                 "sources": sources
             }
 
         # -------------------------------
-        # 🚀 LEVEL 2: STILL NO GEMINI (DIRECT EXTRACTION)
+        # LEVEL 2: MEDIUM MATCH (NO GEMINI)
         # -------------------------------
-        if score >= 1 and len(top_doc) > 50:
+        if score >= 2 and len(top_doc) > 50:
             return {
                 "answer": build_direct_answer(question, top_doc),
                 "sources": sources
             }
 
         # -------------------------------
-        # 🚀 LEVEL 3: ONLY NOW CALL GEMINI
+        # LEVEL 3: GEMINI
         # -------------------------------
-        history_text = "\n".join(history)
-
         prompt = f"""
 You are a strict internal assistant.
 
-ONLY use context.
+ONLY use the context below.
+
+If answer is not in context say:
+"I could not find relevant information in the company policies."
 
 CONTEXT:
 {context}
 
 QUESTION:
 {question}
-
-If answer not in context say:
-"I could not find relevant information in the company policies."
 """
 
         ai_response = safe_generate_content(prompt, sources)
