@@ -87,6 +87,13 @@ def pick_best_doc(docs, query):
 
     return max(docs, key=score)
 
+def is_answerable_from_chunk(doc, question):
+    q_words = set(question.lower().split())
+    doc_lower = doc.lower()
+
+    matches = sum(1 for w in q_words if w in doc_lower)
+
+    return matches >= 2
 
 # -------------------------------
 # RAG SEARCH
@@ -102,9 +109,10 @@ def search_humhub(query):
     metas = results.get("metadatas", [[]])[0]
 
     if not docs:
-        return "", [], ""
+        return "", [], "", 0
 
     top_doc = pick_best_doc(docs, query)
+    score = retrieval_score(docs, query)
 
     context_parts = []
     sources = []
@@ -123,37 +131,7 @@ def search_humhub(query):
 
     context = "\n\n---\n\n".join(context_parts)[:4000]
 
-    return context, sources, top_doc
-
-
-# -------------------------------
-# SMART ROUTER (IMPORTANT FIX)
-# -------------------------------
-def needs_gemini(question: str) -> bool:
-    q = question.lower()
-
-    # If user is asking for explanation/summary → Gemini
-    complex_keywords = [
-        "summarise", "summary", "explain", "compare",
-        "difference", "why", "how does", "meaning"
-    ]
-
-    # policy lookup style → NO GEMINI
-    simple_keywords = [
-        "what is", "who is", "where is", "when is",
-        "how long", "how many", "maternity", "harassment",
-        "leave", "policy", "holiday"
-    ]
-
-    if any(k in q for k in complex_keywords):
-        return True
-
-    if any(k in q for k in simple_keywords):
-        return False
-
-    # default safe mode = use Gemini
-    return True
-
+    return context, sources, top_doc, score
 
 # -------------------------------
 # MAIN ENDPOINT
@@ -163,35 +141,41 @@ def ask(data: Question):
     try:
         session_id = data.session_id
         question = data.question
-
         history = chat_history.get(session_id, [])
 
-        # -------------------------------
-        # RAG
-        # -------------------------------
         context, sources, top_doc = search_humhub(question)
 
-        # -------------------------------
-        # 🚀 ROUTING DECISION
-        # -------------------------------
-        if not needs_gemini(question):
-            # PURE CHROMA MODE (NO GEMINI)
+        # 🚨 PURE CHROMA MODE (NO GEMINI)
+        if is_answerable_from_chunk(top_doc, question):
             return {
-                "answer": top_doc[:1200] if top_doc else context[:1200],
+                "answer": top_doc[:1200],
                 "sources": sources
             }
 
+        # 🤖 ONLY HERE DO YOU CALL GEMINI
+
         # -------------------------------
-        # GEMINI MODE
+        # 🚀 DECISION ENGINE (CORE FIX)
         # -------------------------------
+
+        USE_GEMINI_THRESHOLD = 3
+
+        # CASE 1: Strong match → NO GEMINI
+        if score >= USE_GEMINI_THRESHOLD:
+            return {
+                "answer": top_doc[:1200],
+                "sources": sources
+            }
+
+        # CASE 2: Weak match → GEMINI
         history_text = "\n".join(history)
 
         prompt = f"""
 You are a strict internal company assistant.
 
 RULES:
-- Only use context
-- If not in context say: "I could not find relevant information in the company policies."
+- ONLY use provided context
+- If answer not in context say: "I could not find relevant information in the company policies."
 
 CONTEXT:
 {context}
@@ -207,7 +191,6 @@ Answer clearly and concisely.
 
         ai_response = safe_generate_content(prompt, sources)
 
-        # memory update
         history.append(f"User: {question}")
         history.append(f"AI: {ai_response['answer']}")
         chat_history[session_id] = history[-10:]
@@ -220,6 +203,7 @@ Answer clearly and concisely.
     except Exception as e:
         print("🔥 ERROR:", repr(e))
         traceback.print_exc()
+
         return {
             "answer": "Internal server error",
             "sources": []
