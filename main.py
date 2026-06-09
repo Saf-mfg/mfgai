@@ -179,7 +179,7 @@ def ask(data: Question):
         # -------------------------------
         # RAG
         # -------------------------------
-        context, sources = search_humhub(data.question)
+        context, sources, top_doc = search_humhub(data.question)
 
         # -------------------------------
         # SIMPLE MODE (NO GEMINI)
