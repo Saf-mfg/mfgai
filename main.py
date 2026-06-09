@@ -93,7 +93,7 @@ def search_humhub(query):
         return "No relevant context found.", [], ""
 
     # FIRST RESULT = BEST MATCH
-    top_doc = docs[0]
+    top_doc = max(docs, key=len)
 
     context_parts = []
     sources = []
