@@ -97,16 +97,14 @@ def search_humhub(query):
         include=["documents", "metadatas"]
     )
 
-    print("RESULTS:", results)
-
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
 
     if not docs:
         return "No relevant context found.", [], ""
 
-    # FIRST RESULT = BEST MATCH
-    top_doc = pick_best_doc(docs, data.question)
+    # FIXED: use query instead of data.question
+    top_doc = pick_best_doc(docs, query)
 
     context_parts = []
     sources = []
@@ -140,30 +138,28 @@ def search_humhub(query):
 def is_simple_question(question):
     q = question.lower()
 
+    # ONLY factual lookup triggers (safe)
     keywords = [
         "what is",
-        "how long",
-        "how many",
-        "when does",
-        "when can",
         "who is",
         "where is",
-        "maternity",
-        "paternity",
-        "harassment",
-        "bullying",
-        "holiday",
-        "leave",
-        "absence",
-        "sickness",
-        "bereavement",
-        "phishing",
-        "aml",
-        "anti money laundering",
-        "policy",
-        "entitled",
-        "allowance"
+        "when is",
+        "how long",
+        "how many"
     ]
+
+    # hard block overly broad keywords
+    skip_words = [
+        "summarise",
+        "summary",
+        "explain",
+        "compare",
+        "difference",
+        "policy"
+    ]
+
+    if any(w in q for w in skip_words):
+        return False
 
     return any(k in q for k in keywords)
 
