@@ -3,6 +3,17 @@ import os
 from urllib.parse import urlparse
 import traceback
 
+import os
+import zipfile
+
+if not os.path.exists("./humhub_db"):
+    print("📦 Extracting humhub_db.zip...")
+
+    with zipfile.ZipFile("humhub_db.zip", "r") as zip_ref:
+        zip_ref.extractall(".")
+
+    print("✅ Database extracted")
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from google import genai
