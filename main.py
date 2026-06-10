@@ -115,12 +115,6 @@ def pick_best_doc(docs, metas, query):
 
     return best_doc
 
-    def score(doc):
-        doc_lower = doc.lower()
-        return sum(1 for w in q_words if w in doc_lower)
-
-    return max(docs, key=score)
-
 
 def retrieval_confidence(docs, query):
     q_words = set(query.lower().split())
