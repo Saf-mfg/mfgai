@@ -183,7 +183,7 @@ def search_humhub(query):
     if not docs:
         return "", [], "", 0
 
-    top_doc = pick_best_doc(docs, query)
+    top_doc = pick_best_doc(docs, metas, query)
 
     context_parts = []
     sources = []
