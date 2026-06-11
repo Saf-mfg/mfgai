@@ -100,20 +100,20 @@ def retrieval_confidence(docs, query):
 
     keywords = extract_keywords(query)
 
-    combined = " ".join(
-        docs
-    ).lower()
+    combined = " ".join(docs).lower()
 
-    if not combined.strip():
-        return 0
+    score = 0
 
-    matches = sum(
-        1
-        for word in keywords
-        if word in combined
-    )
+    for word in keywords:
+        if word in combined:
+            score += 1
 
-    return matches
+    # boost definition signals
+    if "definition" in query.lower() or "define" in query.lower():
+        if any(x in combined for x in ["means", "defined", "is when", "refers to"]):
+            score += 3
+
+    return score
 
 # -------------------------------
 # DIRECT ANSWER (NO GEMINI)
@@ -136,11 +136,22 @@ def build_direct_answer(
 
     for sentence in sentences:
 
-        score = sum(
-            1
+        score = 0
+
+        # strong boost for definition-style sentences
+        if any(word in sentence.lower() for word in ["means", "defined", "refers to", "is when", "is the"]):
+        score += 5
+
+        # keyword match
+        score += sum(
+        1
             for keyword in keywords
             if keyword in sentence.lower()
         )
+
+        # penalise disciplinary language
+        if any(word in sentence.lower() for word in ["dismissal", "disciplinary", "liable", "breach"]):
+            score -= 2
 
         if len(sentence) > 30:
             scored.append(
@@ -179,7 +190,7 @@ def build_direct_answer(
 # -------------------------------
 def search_humhub(query):
     results = collection.query(
-        query_texts=[query],
+        query_texts=[query + " definition meaning policy explanation"],
         n_results=30,
         include=["documents", "metadatas"]
     )
