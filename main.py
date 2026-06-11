@@ -185,6 +185,7 @@ def search_humhub(query):
     )
 
     docs = results.get("documents", [[]])[0]
+    print(f"Retrieved {len(docs)} chunks")
     top_chunks = docs[:5]
     metas = results.get("metadatas", [[]])[0]
 
