@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
-import os
 from urllib.parse import urlparse
 import traceback
+import re
 
 import os
 import zipfile
@@ -82,90 +82,97 @@ def clean_source(url: str):
         return url
 
 
-def pick_best_doc(docs, metas, query):
+STOP_WORDS = {
+    "what","is","are","the","a","an",
+    "how","do","does","can","i",
+    "we","you","of","for","to",
+    "please","tell","about"
+}
 
-    q_words = set(query.lower().split())
-
-    policy_scores = {}
-
-    for doc, meta in zip(docs, metas):
-
-        title = meta.get("policy_title", "")
-
-        score = 0
-
-        for word in q_words:
-            if word in title.lower():
-                score += 50
-
-        for word in q_words:
-            if word in doc.lower():
-                score += 1
-
-        policy_scores.setdefault(title, 0)
-        policy_scores[title] += score
-
-    best_policy = max(policy_scores, key=policy_scores.get)
-
-    best_doc = None
-    best_doc_score = -1
-
-    for doc, meta in zip(docs, metas):
-
-        if meta.get("policy_title") != best_policy:
-            continue
-
-        score = sum(
-            1 for w in q_words
-            if w in doc.lower()
-        )
-
-        if score > best_doc_score:
-            best_doc_score = score
-            best_doc = doc
-
-    return best_doc
-
+def extract_keywords(text):
+    words = re.findall(r"\w+", text.lower())
+    return {
+        w for w in words
+        if len(w) > 2 and w not in STOP_WORDS
+    }
 
 def retrieval_confidence(docs, query):
-    q_words = set(query.lower().split())
-    combined = " ".join(docs).lower()
+
+    keywords = extract_keywords(query)
+
+    combined = " ".join(
+        docs
+    ).lower()
 
     if not combined.strip():
         return 0
 
-    return sum(1 for w in q_words if w in combined)
+    matches = sum(
+        1
+        for word in keywords
+        if word in combined
+    )
+
+    return matches
 
 # -------------------------------
 # DIRECT ANSWER (NO GEMINI)
 # -------------------------------
-def build_direct_answer(question, doc):
-    sentences = doc.split(".")
-    q_words = set(question.lower().split())
+def build_direct_answer(
+    question,
+    combined_doc
+):
 
-    for s in sentences:
-        if any(w in s.lower() for w in q_words) and len(s.strip()) > 20:
-            return s.strip() + "."
-
-    return sentences[0].strip() if sentences else doc
-
-# -------------------------------
-# STRONG ANSWER BUILDER
-# -------------------------------
-def build_answer_from_chunks(question, doc):
-    sentences = doc.split(".")
-    q_words = set(question.lower().split())
-
-    best = max(
-        sentences,
-        key=lambda s: sum(w in s.lower() for w in q_words),
-        default=doc
+    keywords = extract_keywords(
+        question
     )
 
-    if len(best.strip()) > 20:
-        return best.strip() + "."
+    sentences = re.split(
+        r'(?<=[.!?])\s+',
+        combined_doc
+    )
 
-    return doc[:800]
+    scored = []
+
+    for sentence in sentences:
+
+        score = sum(
+            1
+            for keyword in keywords
+            if keyword in sentence.lower()
+        )
+
+        if len(sentence) > 30:
+            scored.append(
+                (
+                    score,
+                    sentence
+                )
+            )
+
+    if not scored:
+        return combined_doc[:500]
+
+    scored.sort(
+        key=lambda x: x[0],
+        reverse=True
+    )
+
+    top_sentences = [
+        s
+        for score, s
+        in scored[:3]
+        if score > 0
+    ]
+
+    answer = " ".join(
+    top_sentences
+    )
+
+    if answer.strip():
+        return answer
+
+    return combined_doc[:500]
 
 # -------------------------------
 # RAG SEARCH
@@ -178,21 +185,41 @@ def search_humhub(query):
     )
 
     docs = results.get("documents", [[]])[0]
+    top_chunks = docs[:5]
     metas = results.get("metadatas", [[]])[0]
 
+    if not top_chunks:
+    return "", [], "", 0
+    
     if not docs:
         return "", [], "", 0
 
-    top_doc = pick_best_doc(docs, metas, query)
-
     context_parts = []
     sources = []
+    seen_sources = set()
 
-    for doc, meta in zip(docs[:3], metas[:3]):
-        wiki_page = meta.get("wiki_page", "unknown")
+    combined_doc = "\n".join(
+        top_chunks
+    )
+    
+    for doc, meta in zip(docs, metas):
+
+        wiki_page = meta.get(
+            "wiki_page",
+            "unknown"
+        )
+
+        if wiki_page in seen_sources:
+            continue
+
+        seen_sources.add(
+            wiki_page
+        )
 
         sources.append({
-            "title": clean_source(wiki_page),
+            "title": clean_source(
+                wiki_page
+            ),
             "url": wiki_page
         })
 
@@ -200,10 +227,15 @@ def search_humhub(query):
             f"SOURCE: {wiki_page}\nCONTENT:\n{doc[:1200]}"
         )
 
-    context = "\n\n---\n\n".join(context_parts)[:4000]
-    score = retrieval_confidence(docs, query)
+        if len(sources) >= 3:
+            break
 
-    return context, sources, top_doc, score
+    context = "\n\n---\n\n".join(context_parts)[:4000]
+    score = retrieval_confidence(
+        top_chunks,
+        query
+    )
+    return context, sources, combined_doc, score
 
 # -------------------------------
 # MAIN ENDPOINT
@@ -219,25 +251,62 @@ def ask(data: Question):
         # -------------------------------
         # RAG
         # -------------------------------
-        context, sources, top_doc, score = search_humhub(question)
+        context, sources, combined_doc, score = search_humhub(question)
+        print("\n===================")
+        print("QUESTION:", question)
+        print("KEYWORDS:", extract_keywords(question))
+        print("SCORE:", score)
+        print("TOP TEXT:")
+        print(combined_doc[:500])
+        print("===================\n")
 
         # -------------------------------
         # LEVEL 1: STRONG MATCH (NO GEMINI)
         # -------------------------------
-        if score >= 5:
+        keywords = extract_keywords(
+            question
+        )
+        
+        simple_patterns = [
+            "what is",
+            "define",
+            "who is",
+            "where is"
+        ]
+
+        simple_question = any(
+            question.lower().startswith(p)
+            for p in simple_patterns
+        )
+        
+        if (
+            simple_question
+            and score >= 1
+        ):
+            print("DIRECT ANSWER ROUTE")
+            
             return {
-                "answer": build_answer_from_chunks(question, top_doc),
+                "answer": build_direct_answer(
+                    question,
+                    combined_doc
+                ),
                 "sources": sources
             }
 
-        # -------------------------------
-        # LEVEL 2: MEDIUM MATCH (NO GEMINI)
-        # -------------------------------
-        if score >= 2 and len(top_doc) > 50:
+        if (
+            len(question.split()) <= 4
+            and score >= 1
+        ):
+            print("SHORT QUERY ROUTE")
+
             return {
-                "answer": build_direct_answer(question, top_doc),
+                "answer": build_direct_answer(
+                    question,
+                    combined_doc
+                ),
                 "sources": sources
             }
+            
 
         # -------------------------------
         # LEVEL 3: GEMINI
@@ -257,6 +326,7 @@ QUESTION:
 {question}
 """
 
+        print("GEMINI ROUTE")
         ai_response = safe_generate_content(prompt, sources)
 
         history.append(f"User: {question}")
