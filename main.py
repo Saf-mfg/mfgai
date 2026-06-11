@@ -172,8 +172,8 @@ def build_direct_answer(
     top_sentences = [
         s
         for score, s
-        in scored[:3]
-        if score > 0
+        in scored[:2]
+        if score >= 2
     ]
 
     answer = " ".join(
