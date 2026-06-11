@@ -190,7 +190,7 @@ def search_humhub(query):
     metas = results.get("metadatas", [[]])[0]
 
     if not top_chunks:
-    return "", [], "", 0
+        return "", [], "", 0
     
     if not docs:
         return "", [], "", 0
