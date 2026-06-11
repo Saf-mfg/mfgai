@@ -140,7 +140,7 @@ def build_direct_answer(
 
         # strong boost for definition-style sentences
         if any(word in sentence.lower() for word in ["means", "defined", "refers to", "is when", "is the"]):
-        score += 5
+            score += 5
 
         # keyword match
         score += sum(
