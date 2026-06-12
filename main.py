@@ -198,24 +198,31 @@ def build_direct_answer(
 # -------------------------------
 def search_humhub(query):
     results = collection.query(
-        query_texts=[query + " definition meaning policy explanation"],
+        query_texts=[query],
         n_results=30,
         include=["documents", "metadatas"]
     )
 
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
+    top_chunks = docs[:5]
+
+    policy_counts = Counter(
+        meta.get("policy_title", "")
+        for meta in metas[:10]
+    )
+
+    best_policy = None
+    if policy_counts:
+        best_policy = policy_counts.most_common(1)[0][0]
+        if best_policy == "":
+            best_policy = None
 
     for i, doc in enumerate(docs[:5]):
         print(f"\nTOP CHUNK {i+1}")
         print(doc[:500])
 
     print(f"Retrieved {len(docs)} chunks")
-
-    policy_counts = Counter(
-        meta.get("policy_title", "")
-        for meta in metas[:10]
-    )
 
     if not docs:
         return "", [], "", 0
@@ -227,15 +234,25 @@ def search_humhub(query):
     policy_chunks = []
 
     for doc, meta in zip(docs, metas):
-
-        if meta.get("policy_title") == best_policy:
+        if best_policy and meta.get("policy_title") == best_policy:
             policy_chunks.append(doc)
 
-    combined_doc = "\n".join(
-        policy_chunks[:5]
-    )
+    # fallback if filtering fails
+    if not policy_chunks:
+        policy_chunks = docs[:5]
+
+    combined_doc = "\n".join(policy_chunks[:5])
     
-    for doc, meta in zip(policy_chunks, metas):
+    filtered = [
+    (doc, meta)
+    for doc, meta in zip(docs, metas)
+    if best_policy and meta.get("policy_title") == best_policy
+    ]
+
+    if not filtered:
+        filtered = list(zip(policy_chunks, metas[:len(policy_chunks)]))
+
+    for doc, meta in filtered:
 
         wiki_page = meta.get(
             "wiki_page",
@@ -245,14 +262,10 @@ def search_humhub(query):
         if wiki_page in seen_sources:
             continue
 
-        seen_sources.add(
-            wiki_page
-        )
+        seen_sources.add(wiki_page)
 
         sources.append({
-            "title": clean_source(
-                wiki_page
-            ),
+            "title": clean_source(wiki_page),
             "url": wiki_page
         })
 
@@ -265,7 +278,7 @@ def search_humhub(query):
 
     context = "\n\n---\n\n".join(context_parts)[:4000]
     score = retrieval_confidence(
-        policy_chunks,
+        policy_chunks[:5],
         query
     )
     return context, sources, combined_doc, score
@@ -305,7 +318,7 @@ def ask(data: Question):
             for word in POLICY_LOOKUP_WORDS
         )
         
-        if is_policy_lookup:
+        if is_policy_lookup and best_policy:
             print("POLICY LOOKUP ROUTE")
 
             return {
