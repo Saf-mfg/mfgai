@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from urllib.parse import urlparse
+from collections import Counter
 import traceback
 import re
 
@@ -210,6 +211,15 @@ def search_humhub(query):
     top_chunks = docs[:5]
     metas = results.get("metadatas", [[]])[0]
 
+    policy_counts = Counter(
+        meta.get("policy_title", "")
+        for meta in metas[:10]
+    )
+
+best_policy = policy_counts.most_common(1)[0][0]
+
+print("BEST POLICY:", best_policy)
+
     if not top_chunks:
         return "", [], "", 0
     
@@ -220,8 +230,15 @@ def search_humhub(query):
     sources = []
     seen_sources = set()
 
+    policy_chunks = []
+
+    for doc, meta in zip(docs, metas):
+
+        if meta.get("policy_title") == best_policy:
+            policy_chunks.append(doc)
+
     combined_doc = "\n".join(
-        top_chunks
+        policy_chunks[:5]
     )
     
     for doc, meta in zip(docs, metas):
