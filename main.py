@@ -297,7 +297,7 @@ def ask(data: Question):
         # -------------------------------
         # RAG
         # -------------------------------
-        context, sources, combined_doc, score = search_humhub(question)
+        context, sources, combined_doc, score, best_policy = search_humhub(question)
         print("\n===================")
         print("QUESTION:", question)
         print("KEYWORDS:", extract_keywords(question))
