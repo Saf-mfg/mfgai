@@ -82,6 +82,17 @@ def clean_source(url: str):
         return url
 
 
+POLICY_LOOKUP_WORDS = {
+    "policy",
+    "procedure",
+    "guideline"
+}
+
+is_policy_lookup = any(
+    word in question.lower()
+    for word in POLICY_LOOKUP_WORDS
+)
+
 STOP_WORDS = {
     "what","is","are","the","a","an",
     "how","do","does","can","i",
@@ -114,6 +125,17 @@ def retrieval_confidence(docs, query):
             score += 3
 
     return score
+
+
+
+if is_policy_lookup:
+    print("POLICY LOOKUP ROUTE")
+
+    return {
+        "answer": combined_doc[:1200],
+        "sources": sources
+    }
+
 
 # -------------------------------
 # DIRECT ANSWER (NO GEMINI)
