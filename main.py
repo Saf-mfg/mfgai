@@ -88,8 +88,6 @@ POLICY_LOOKUP_WORDS = {
     "guideline"
 }
 
-)
-
 STOP_WORDS = {
     "what","is","are","the","a","an",
     "how","do","does","can","i",
