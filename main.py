@@ -88,9 +88,6 @@ POLICY_LOOKUP_WORDS = {
     "guideline"
 }
 
-is_policy_lookup = any(
-    word in question.lower()
-    for word in POLICY_LOOKUP_WORDS
 )
 
 STOP_WORDS = {
@@ -125,16 +122,6 @@ def retrieval_confidence(docs, query):
             score += 3
 
     return score
-
-
-
-if is_policy_lookup:
-    print("POLICY LOOKUP ROUTE")
-
-    return {
-        "answer": combined_doc[:1200],
-        "sources": sources
-    }
 
 
 # -------------------------------
@@ -303,6 +290,19 @@ def ask(data: Question):
         keywords = extract_keywords(
             question
         )
+
+        is_policy_lookup = any(
+            word in question.lower()
+            for word in POLICY_LOOKUP_WORDS
+        )
+        
+        if is_policy_lookup:
+            print("POLICY LOOKUP ROUTE")
+
+            return {
+                "answer": combined_doc[:1200],
+                "sources": sources
+            }
         
         simple_patterns = [
             "what is",
