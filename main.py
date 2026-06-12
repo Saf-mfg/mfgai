@@ -217,13 +217,6 @@ def search_humhub(query):
         for meta in metas[:10]
     )
 
-best_policy = policy_counts.most_common(1)[0][0]
-
-print("BEST POLICY:", best_policy)
-
-    if not top_chunks:
-        return "", [], "", 0
-    
     if not docs:
         return "", [], "", 0
 
@@ -242,7 +235,7 @@ print("BEST POLICY:", best_policy)
         policy_chunks[:5]
     )
     
-    for doc, meta in zip(docs, metas):
+    for doc, meta in zip(policy_chunks, metas):
 
         wiki_page = meta.get(
             "wiki_page",
@@ -272,7 +265,7 @@ print("BEST POLICY:", best_policy)
 
     context = "\n\n---\n\n".join(context_parts)[:4000]
     score = retrieval_confidence(
-        top_chunks,
+        policy_chunks,
         query
     )
     return context, sources, combined_doc, score
