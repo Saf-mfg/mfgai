@@ -207,15 +207,36 @@ def search_humhub(query):
     metas = results.get("metadatas", [[]])[0]
     top_chunks = docs[:5]
 
-    policy_counts = Counter(
-        meta.get("policy_title", "")
-        for meta in metas[:10]
-    )
+    policy_scores = Counter()
+
+    for meta in metas[:10]:
+        title = (meta.get("policy_title") or "").lower()
+
+        score = 0
+
+        # keyword overlap with query
+        for word in extract_keywords(query):
+            if word in title:
+                score += 3
+
+        # strong boosts for exact matches
+        if "maternity" in title and "maternity" in query.lower():
+            score += 10
+
+        if "harassment" in title and "harassment" in query.lower():
+            score += 10
+
+        if "pregnancy" in title and "maternity" in query.lower():
+            score -= 5  # important: stop wrong selection
+
+        policy_scores[meta.get("policy_title", "")] += score
 
     best_policy = None
-    if policy_counts:
-        best_policy = policy_counts.most_common(1)[0][0]
-        if best_policy == "":
+
+    if policy_scores:
+        best_policy, best_score = policy_scores.most_common(1)[0]
+
+        if best_score <= 0:
             best_policy = None
 
     for i, doc in enumerate(docs[:5]):
@@ -239,15 +260,22 @@ def search_humhub(query):
 
     # fallback if filtering fails
     if not policy_chunks:
-        policy_chunks = docs[:5]
+        return "", [], "", 0, None
 
     combined_doc = "\n".join(policy_chunks[:5])
     
-    filtered = [
-    (doc, meta)
-    for doc, meta in zip(docs, metas)
-    if best_policy and meta.get("policy_title") == best_policy
-    ]
+    if best_policy:
+        filtered = [
+            (doc, meta)
+            for doc, meta in zip(docs, metas)
+            if meta.get("policy_title") == best_policy
+        ]
+    else:
+        filtered = [
+            (doc, meta)
+            for doc, meta in zip(docs, metas)
+            if meta.get("policy_title")
+        ]
 
     if not filtered:
         filtered = list(zip(policy_chunks, metas[:len(policy_chunks)]))
@@ -318,9 +346,11 @@ def ask(data: Question):
             for word in POLICY_LOOKUP_WORDS
         )
         
-        if is_policy_lookup and best_policy:
-            print("POLICY LOOKUP ROUTE")
-
+        if (
+            is_policy_lookup
+            and best_policy
+            and score >= 2
+        ):
             return {
                 "answer": combined_doc[:1200],
                 "sources": sources
