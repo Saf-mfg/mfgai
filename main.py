@@ -281,7 +281,7 @@ def search_humhub(query):
         policy_chunks[:5],
         query
     )
-    return context, sources, combined_doc, score
+    return context, sources, combined_doc, score, best_policy
 
 # -------------------------------
 # MAIN ENDPOINT
