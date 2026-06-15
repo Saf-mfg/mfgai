@@ -9,7 +9,6 @@ import zipfile
 from fastapi import FastAPI
 from pydantic import BaseModel
 from google import genai
-from sklearn.metrics.pairwise import cosine_similarity
 
 from rag_db import collection
 
