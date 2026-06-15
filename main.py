@@ -143,66 +143,36 @@ def extract_definition_block(text):
 # -------------------------------
 def build_direct_answer(question, combined_doc):
 
-    # STEP 1: isolate definition section
     definition_text = extract_definition_block(combined_doc)
 
-    # STEP 2: clean + split
-    sentences = clean_sentences(definition_text)
-
     keywords = extract_keywords(question)
+    lower = definition_text.lower()
+
+    # 🧠 CASE 1: definition query → return full block
+    if any(k in question.lower() for k in ["what is", "define", "what's"]):
+        return definition_text.strip()
+
+    # 🧠 CASE 2: fallback scoring only if needed
+    sentences = clean_sentences(definition_text)
 
     scored = []
 
-    for i, sentence in enumerate(sentences):
-
-        lower = sentence.lower()
+    for sentence in sentences:
         score = 0
+        s = sentence.lower()
 
-        # 🚫 remove noise
-        if any(x in lower for x in ["policy title", "version", "review due"]):
-            continue
-
-        # 🎯 definition boost
-        if (
-            "harassment is" in lower
-            or "defined as" in lower
-            or "means" in lower
-            or "refers to" in lower
-        ):
-            score += 100
-
-            # continuation boost (FIXED i usage)
-            if i > 0 and "harassment is" in sentences[i - 1].lower():
-                score += 40
-
-        # keyword match
         for keyword in keywords:
-            if keyword in lower:
+            if keyword in s:
                 score += 5
 
-        # high-value legal signals
-        if "single incident can amount" in lower:
-            score += 80
+        if "harassment is" in s:
+            score += 100
 
-        if "disciplinary procedure" in lower:
-            score += 30
+        scored.append((score, sentence))
 
-        if "dismissal" in lower:
-            score += 20
+    scored.sort(reverse=True, key=lambda x: x[0])
 
-        if len(sentence) > 40:
-            scored.append((score, sentence))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    answer_sentences = []
-    for score, sentence in scored:
-        if score >= 20:
-            answer_sentences.append(sentence)
-        if len(answer_sentences) >= 2:
-            break
-
-    return " ".join(answer_sentences)
+    return " ".join([s for _, s in scored[:2]])
 # -------------------------------
 # RAG SEARCH
 # -------------------------------
