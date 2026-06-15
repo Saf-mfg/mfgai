@@ -74,6 +74,15 @@ def clean_sentences(text):
     return [s.strip() for s in sentences if len(s.strip()) > 30]
 
 
+def create_embedding(text):
+    response = client.models.embed_content(
+        model="text-embedding-004",
+        contents=text
+    )
+
+    return response.embeddings[0].values
+
+
 # -------------------------------
 # GEMINI
 # -------------------------------
@@ -93,8 +102,10 @@ def safe_generate_content(prompt):
 # RAG CORE (RETRIEVAL + RERANK)
 # -------------------------------
 def retrieve_context(query: str):
+    query_embedding = create_embedding(query)
+
     results = collection.query(
-        query_texts=[query],
+        query_embeddings=[query_embedding],
         n_results=30,
         include=["documents", "metadatas"]
     )
