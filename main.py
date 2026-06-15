@@ -3,33 +3,28 @@ from urllib.parse import urlparse
 from collections import Counter
 import traceback
 import re
-
 import os
 import zipfile
-
-if not os.path.exists("./humhub_db"):
-    print("📦 Extracting humhub_db.zip...")
-
-    with zipfile.ZipFile("humhub_db.zip", "r") as zip_ref:
-        zip_ref.extractall(".")
-
-    print("✅ Database extracted")
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 from google import genai
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 from rag_db import collection
 
+# -------------------------------
+# INIT
+# -------------------------------
 load_dotenv()
 
-# -------------------------------
-# APP + CLIENT
-# -------------------------------
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 app = FastAPI()
 
-from fastapi.middleware.cors import CORSMiddleware
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+chat_history = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,39 +35,15 @@ app.add_middleware(
 )
 
 # -------------------------------
-# MEMORY
-# -------------------------------
-chat_history = {}
-
-# -------------------------------
-# REQUEST MODEL
+# REQUEST
 # -------------------------------
 class Question(BaseModel):
     session_id: str
     question: str
 
-# -------------------------------
-# GEMINI CALL
-# -------------------------------
-def safe_generate_content(prompt, sources=None):
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
-        return {
-            "answer": response.text,
-            "sources": sources or []
-        }
-    except Exception as e:
-        print("🔥 GEMINI ERROR:", repr(e))
-        return {
-            "answer": "AI temporarily unavailable. Try again shortly.",
-            "sources": sources or []
-        }
 
 # -------------------------------
-# HELPERS
+# UTIL
 # -------------------------------
 def clean_source(url: str):
     try:
@@ -83,17 +54,9 @@ def clean_source(url: str):
         return url
 
 
-LOOKUP_WORDS = {
-    "policy",
-    "procedure",
-    "guideline"
-}
-
 STOP_WORDS = {
-    "what","is","are","the","a","an",
-    "how","do","does","can","i",
-    "we","you","of","for","to",
-    "please","tell","about"
+    "what","is","are","the","a","an","how","do","does","can","i",
+    "we","you","of","for","to","please","tell","about"
 }
 
 def extract_keywords(text):
@@ -103,80 +66,37 @@ def extract_keywords(text):
         if len(w) > 2 and w not in STOP_WORDS
     }
 
-def retrieval_confidence(docs, query):
 
-    keywords = extract_keywords(query)
+def is_definition_question(q: str):
+    q = q.lower()
+    return any(x in q for x in ["what is", "define", "meaning of"])
 
-    combined = " ".join(docs).lower()
-
-    score = 0
-
-    for word in keywords:
-        if word in combined:
-            score += 1
-
-    # boost definition signals
-    if "definition" in query.lower() or "define" in query.lower():
-        if any(x in combined for x in ["means", "defined", "is when", "refers to"]):
-            score += 3
-
-    return score
 
 def clean_sentences(text):
     text = re.sub(r"\s+", " ", text)
-
-    # remove policy headers
-    text = re.sub(r"POLICY TITLE:.*?(?=4\\.|\\d+\\.|$)", "", text, flags=re.IGNORECASE)
-
-    # split cleanly
     sentences = re.split(r"(?<=[.!?])\s+", text)
-
-    return [s.strip() for s in sentences if len(s.strip()) > 40]
-
-def extract_definition_block(text):
-    match = re.search(r"4\.1.*?(?=4\.\d+|$)", text, re.DOTALL | re.IGNORECASE)
-    return match.group(0) if match else text
+    return [s.strip() for s in sentences if len(s.strip()) > 30]
 
 
 # -------------------------------
-# DIRECT ANSWER (NO GEMINI)
+# GEMINI
 # -------------------------------
-def build_direct_answer(question, combined_doc):
+def safe_generate_content(prompt):
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        print("GEMINI ERROR:", repr(e))
+        return "AI temporarily unavailable."
 
-    definition_text = extract_definition_block(combined_doc)
 
-    keywords = extract_keywords(question)
-    lower = definition_text.lower()
-
-    # 🧠 CASE 1: definition query → return full block
-    if any(k in question.lower() for k in ["what is", "define", "what's"]):
-        return definition_text.strip()
-
-    # 🧠 CASE 2: fallback scoring only if needed
-    sentences = clean_sentences(definition_text)
-
-    scored = []
-
-    for sentence in sentences:
-        score = 0
-        s = sentence.lower()
-
-        for keyword in keywords:
-            if keyword in s:
-                score += 5
-
-        if "harassment is" in s:
-            score += 100
-
-        scored.append((score, sentence))
-
-    scored.sort(reverse=True, key=lambda x: x[0])
-
-    return " ".join([s for _, s in scored[:2]])
 # -------------------------------
-# RAG SEARCH
+# RAG CORE (RETRIEVAL + RERANK)
 # -------------------------------
-def search_humhub(query):
+def retrieve_context(query: str):
     results = collection.query(
         query_texts=[query],
         n_results=30,
@@ -185,112 +105,57 @@ def search_humhub(query):
 
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
-    top_chunks = docs[:5]
-
-    policy_scores = Counter()
-
-    for meta in metas[:10]:
-        title = (meta.get("policy_title") or "").lower()
-
-        score = 0
-
-        # keyword overlap with query
-        for word in extract_keywords(query):
-            if word in title:
-                score += 3
-
-        # strong boosts for exact matches
-        if "maternity" in title and "maternity" in query.lower():
-            score += 10
-
-        if "harassment" in title and "harassment" in query.lower():
-            score += 10
-
-        if "pregnancy" in title and "maternity" in query.lower():
-            score -= 5  # important: stop wrong selection
-
-        policy_scores[meta.get("policy_title", "")] += score
-
-    best_policy = None
-
-    if policy_scores:
-        best_policy, best_score = policy_scores.most_common(1)[0]
-
-        if best_score <= 0:
-            best_policy = None
-
-    for i, doc in enumerate(docs[:5]):
-        print(f"\nTOP CHUNK {i+1}")
-        print(doc[:500])
-
-    print(f"Retrieved {len(docs)} chunks")
 
     if not docs:
-        return "", [], "", 0
+        return [], []
 
-    context_parts = []
-    sources = []
-    seen_sources = set()
+    # -------------------------------
+    # SEMANTIC RERANK (IMPORTANT PART)
+    # -------------------------------
+    query_vec = model.encode([query])
+    doc_vecs = model.encode(docs)
 
-    policy_chunks = []
+    scores = cosine_similarity(query_vec, doc_vecs)[0]
+    top_indices = scores.argsort()[-6:][::-1]
 
-    for doc, meta in zip(docs, metas):
-        if best_policy and meta.get("policy_title") == best_policy:
-            policy_chunks.append(doc)
+    top_docs = [docs[i] for i in top_indices]
+    top_metas = [metas[i] for i in top_indices]
 
-    # fallback if filtering fails
-    if not policy_chunks:
-        return "", [], "", 0, None
+    return top_docs, top_metas
 
-    raw_doc = "\n".join(policy_chunks)
-    combined_doc = extract_definition_block(raw_doc)
-    
-    if best_policy:
-        filtered = [
-            (doc, meta)
-            for doc, meta in zip(docs, metas)
-            if meta.get("policy_title") == best_policy
-        ]
-    else:
-        filtered = [
-            (doc, meta)
-            for doc, meta in zip(docs, metas)
-            if meta.get("policy_title")
-        ]
 
-    if not filtered:
-        filtered = list(zip(policy_chunks, metas[:len(policy_chunks)]))
+# -------------------------------
+# DIRECT ANSWER BUILDER
+# -------------------------------
+def build_direct_answer(question, context):
+    sentences = clean_sentences(context)
+    keywords = extract_keywords(question)
 
-    for doc, meta in filtered:
+    scored = []
 
-        wiki_page = meta.get(
-            "wiki_page",
-            "unknown"
-        )
+    for s in sentences:
+        score = 0
+        lower = s.lower()
 
-        if wiki_page in seen_sources:
-            continue
+        # strong definition signals
+        if any(x in lower for x in [
+            "is defined as",
+            "means",
+            "refers to",
+            "definition"
+        ]):
+            score += 50
 
-        seen_sources.add(wiki_page)
+        for k in keywords:
+            if k in lower:
+                score += 5
 
-        sources.append({
-            "title": clean_source(wiki_page),
-            "url": wiki_page
-        })
+        scored.append((score, s))
 
-        context_parts.append(
-            f"SOURCE: {wiki_page}\nCONTENT:\n{doc[:1200]}"
-        )
+    scored.sort(reverse=True, key=lambda x: x[0])
 
-        if len(sources) >= 3:
-            break
+    return " ".join([s for _, s in scored[:3]])
 
-    context = "\n\n---\n\n".join(context_parts)[:4000]
-    score = retrieval_confidence(
-        policy_chunks[:5],
-        query
-    )
-    return context, sources, combined_doc, score, best_policy
 
 # -------------------------------
 # MAIN ENDPOINT
@@ -299,97 +164,39 @@ def search_humhub(query):
 def ask(data: Question):
     try:
         question = data.question
-        session_id = data.session_id
-
-        history = chat_history.get(session_id, [])
 
         # -------------------------------
-        # RAG
+        # RETRIEVE
         # -------------------------------
-        context, sources, combined_doc, score, best_policy = search_humhub(question)
-        print("\n===================")
-        print("QUESTION:", question)
-        print("KEYWORDS:", extract_keywords(question))
-        print("SCORE:", score)
-        print("TOP TEXT:")
-        print(combined_doc[:500])
-        print("===================\n")
+        docs, metas = retrieve_context(question)
+
+        context = "\n\n".join(docs[:4])
 
         # -------------------------------
-        # LEVEL 1: STRONG MATCH (NO GEMINI)
+        # DIRECT MODE (FAST PATH)
         # -------------------------------
-        keywords = extract_keywords(
-            question
-        )
-
-        is_policy_lookup = any(
-            word in question.lower()
-            for word in LOOKUP_WORDS
-        )
-        
-        if (
-            is_policy_lookup
-            and best_policy
-            and score >= 2
-        ):
-            return {
-                "answer": build_direct_answer(
-                    question,
-                    combined_doc
-                ),
-                "sources": sources
-            }
-        
-        simple_patterns = [
-            "what is",
-            "define",
-            "who is",
-            "where is"
-        ]
-
-        simple_question = any(
-            question.lower().startswith(p)
-            for p in simple_patterns
-        )
-        
-        if (
-            simple_question
-            and score >= 1
-        ):
-            print("DIRECT ANSWER ROUTE")
-            
-            return {
-                "answer": build_direct_answer(
-                    question,
-                    combined_doc
-                ),
-                "sources": sources
-            }
-
-        if (
-            len(question.split()) <= 4
-            and score >= 1
-        ):
-            print("SHORT QUERY ROUTE")
-
-            return {
-                "answer": build_direct_answer(
-                    question,
-                    combined_doc
-                ),
-                "sources": sources
-            }
-            
+        if len(question.split()) <= 6 or is_definition_question(question):
+            if context:
+                return {
+                    "answer": build_direct_answer(question, context),
+                    "sources": [
+                        {
+                            "title": clean_source(m.get("wiki_page", "")),
+                            "url": m.get("wiki_page", "")
+                        }
+                        for m in metas[:3]
+                    ]
+                }
 
         # -------------------------------
-        # LEVEL 3: GEMINI
+        # GEMINI FALLBACK
         # -------------------------------
         prompt = f"""
-You are a strict internal assistant.
+You are a strict internal policy assistant.
 
 ONLY use the context below.
 
-If answer is not in context say:
+If the answer is not in context, say:
 "I could not find relevant information in the company policies."
 
 CONTEXT:
@@ -399,20 +206,21 @@ QUESTION:
 {question}
 """
 
-        print("GEMINI ROUTE")
-        ai_response = safe_generate_content(prompt, sources)
-
-        history.append(f"User: {question}")
-        history.append(f"AI: {ai_response['answer']}")
-        chat_history[session_id] = history[-10:]
+        answer = safe_generate_content(prompt)
 
         return {
-            "answer": ai_response["answer"],
-            "sources": sources
+            "answer": answer,
+            "sources": [
+                {
+                    "title": clean_source(m.get("wiki_page", "")),
+                    "url": m.get("wiki_page", "")
+                }
+                for m in metas[:3]
+            ]
         }
 
     except Exception as e:
-        print("🔥 ERROR:", repr(e))
+        print("ERROR:", repr(e))
         traceback.print_exc()
 
         return {
