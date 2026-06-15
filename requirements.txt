@@ -1,8 +1,7 @@
 fastapi
 uvicorn
-chromadb
-pdfplumber
-beautifulsoup4
-playwright
-google-genai
 python-dotenv
+google-genai
+sentence-transformers
+chromadb
+scikit-learn
