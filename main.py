@@ -134,7 +134,7 @@ def build_direct_answer(question, combined_doc):
     text = re.sub(r'\s+', ' ', combined_doc)
 
     sentences = re.split(
-        r'(?<=[.!?])\s+(?=\d+\.?\d*|\w)',
+        r'(?<=[.!?])\s+',
         text
     )
 
@@ -156,7 +156,7 @@ def build_direct_answer(question, combined_doc):
 
         # continuation boost
         if "single incident can amount" in lower:
-            score += 50
+            score += 80
 
         if "disciplinary procedure" in lower:
             score += 30
@@ -191,7 +191,7 @@ def build_direct_answer(question, combined_doc):
     answer_sentences = []
 
     for score, sentence in scored:
-        if score >= 5:
+        if score >= 20:
             answer_sentences.append(sentence)
 
         if len(answer_sentences) >= 2:
