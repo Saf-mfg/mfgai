@@ -1,10 +1,8 @@
 from dotenv import load_dotenv
 from urllib.parse import urlparse
-from collections import Counter
 import traceback
 import re
 import os
-import zipfile
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +30,7 @@ app.add_middleware(
 )
 
 # -------------------------------
-# REQUEST
+# REQUEST MODEL
 # -------------------------------
 class Question(BaseModel):
     session_id: str
@@ -75,15 +73,6 @@ def clean_sentences(text):
     return [s.strip() for s in sentences if len(s.strip()) > 30]
 
 
-def create_embedding(text):
-    response = client.models.embed_content(
-        model="text-embedding-004",
-        contents=text
-    )
-
-    return response.embeddings[0].values
-
-
 # -------------------------------
 # GEMINI
 # -------------------------------
@@ -100,14 +89,12 @@ def safe_generate_content(prompt):
 
 
 # -------------------------------
-# RAG CORE (RETRIEVAL + RERANK)
+# RAG RETRIEVAL (CLEAN + CORRECT)
 # -------------------------------
 def retrieve_context(query: str):
-    query_embedding = create_embedding(query)
-
     results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=30,
+        query_texts=[query],
+        n_results=10,
         include=["documents", "metadatas"]
     )
 
@@ -117,17 +104,9 @@ def retrieve_context(query: str):
     if not docs:
         return [], []
 
-    # -------------------------------
-    # SEMANTIC RERANK (IMPORTANT PART)
-    # -------------------------------
-    query_vec = model.encode([query])
-    doc_vecs = model.encode(docs)
-
-    scores = cosine_similarity(query_vec, doc_vecs)[0]
-    top_indices = scores.argsort()[-6:][::-1]
-
-    top_docs = [docs[i] for i in top_indices]
-    top_metas = [metas[i] for i in top_indices]
+    # Chroma already does semantic ranking → just use top results
+    top_docs = docs[:5]
+    top_metas = metas[:5]
 
     return top_docs, top_metas
 
@@ -145,7 +124,6 @@ def build_direct_answer(question, context):
         score = 0
         lower = s.lower()
 
-        # strong definition signals
         if any(x in lower for x in [
             "is defined as",
             "means",
@@ -177,11 +155,10 @@ def ask(data: Question):
         # RETRIEVE
         # -------------------------------
         docs, metas = retrieve_context(question)
-
         context = "\n\n".join(docs[:4])
 
         # -------------------------------
-        # DIRECT MODE (FAST PATH)
+        # DIRECT MODE
         # -------------------------------
         if len(question.split()) <= 6 or is_definition_question(question):
             if context:
