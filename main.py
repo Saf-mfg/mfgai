@@ -83,7 +83,7 @@ def clean_source(url: str):
         return url
 
 
-POLICY_LOOKUP_WORDS = {
+LOOKUP_WORDS = {
     "policy",
     "procedure",
     "guideline"
@@ -126,77 +126,71 @@ def retrieval_confidence(docs, query):
 # -------------------------------
 # DIRECT ANSWER (NO GEMINI)
 # -------------------------------
-def build_direct_answer(
-    question,
-    combined_doc
-):
-
-    keywords = extract_keywords(
-        question
-    )
+def build_direct_answer(question, combined_doc):
 
     sentences = re.split(
         r'(?<=[.!?])\s+',
         combined_doc
     )
 
+    q = question.lower()
+
+    # definition questions get priority
+    if any(x in q for x in ["what is", "define", "definition"]):
+
+        definition_words = [
+            "is any",
+            "is the",
+            "means",
+            "defined as",
+            "refers to",
+            "is when"
+        ]
+
+        definition_hits = []
+
+        for sentence in sentences:
+            lower = sentence.lower()
+
+            if any(x in lower for x in definition_words):
+
+                if any(
+                    word in lower
+                    for word in extract_keywords(question)
+                ):
+                    definition_hits.append(sentence)
+
+        if definition_hits:
+            return definition_hits[0]
+
+
     scored = []
+
+    keywords = extract_keywords(question)
 
     for sentence in sentences:
 
-        score = 0
-
-        # strong boost for definition-style sentences
         lower = sentence.lower()
 
-        if (
-            "means" in lower
-            or "defined" in lower
-            or "harassment is" in lower
-            or "harassment means" in lower
-        ):
-            score += 10
-
-        # keyword match
-        score += sum(
-        1
-            for keyword in keywords
-            if keyword in sentence.lower()
+        score = sum(
+            1
+            for word in keywords
+            if word in lower
         )
 
-        # penalise disciplinary language
-        if any(word in sentence.lower() for word in ["dismissal", "disciplinary", "liable", "breach"]):
-            score -= 2
-
-        if len(sentence) > 30:
+        if len(sentence) > 50:
             scored.append(
-                (
-                    score,
-                    sentence
-                )
+                (score, sentence)
             )
 
-    if not scored:
-        return combined_doc[:500]
 
     scored.sort(
         key=lambda x: x[0],
         reverse=True
     )
 
-    top_sentences = [
-        s
-        for score, s
-        in scored[:2]
-        if score >= 1
-    ]
-
-    answer = " ".join(
-    top_sentences
-    )
-
-    if answer.strip():
-        return answer
+    if scored:
+        return scored[0][1]
 
     return combined_doc[:500]
 
@@ -259,10 +253,7 @@ def search_humhub(query):
     sources = []
     seen_sources = set()
 
-    policy_chunks = [
-    doc for doc in policy_chunks
-    if len(doc) > 80
-    ]
+    policy_chunks = []
 
     for doc, meta in zip(docs, metas):
         if best_policy and meta.get("policy_title") == best_policy:
@@ -353,11 +344,11 @@ def ask(data: Question):
 
         is_policy_lookup = any(
             word in question.lower()
-            for word in POLICY_LOOKUP_WORDS
+            for word in LOOKUP_WORDS
         )
         
         if (
-            is_policy_lookup
+            is_lookup
             and best_policy
             and score >= 2
         ):
