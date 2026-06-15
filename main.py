@@ -128,69 +128,66 @@ def retrieval_confidence(docs, query):
 # -------------------------------
 def build_direct_answer(question, combined_doc):
 
-    q = question.lower()
+    keywords = extract_keywords(question)
 
-    if any(x in q for x in [
-        "what is",
-        "define",
-        "definition"
-    ]):
+    # normalise PDF extraction
+    text = re.sub(r'\s+', ' ', combined_doc)
 
-        lines = combined_doc.split("\n")
+    sentences = re.split(
+        r'(?<=[.!?])\s+(?=\d+\.?\d*|\w)',
+        text
+    )
 
-        answer = []
+    scored = []
 
-        capture = False
-        definition_found = False
+    for sentence in sentences:
 
-        for line in lines:
+        lower = sentence.lower()
+        score = 0
 
-            clean = line.strip()
-            lower = clean.lower()
+        # definition priority
+        if (
+            "harassment is" in lower
+            or "means" in lower
+            or "defined as" in lower
+            or "refers to" in lower
+        ):
+            score += 100
 
-            # start at definition
-            if "harassment is any" in lower:
-                capture = True
-                definition_found = True
+        for keyword in keywords:
+            if keyword in lower:
+                score += 5
 
+        # remove policy metadata/noise
+        if "policy title" in lower:
+            score -= 50
 
-            if capture:
+        if "version" in lower:
+            score -= 50
 
-                # stop when unrelated section starts
-                if (
-                    lower.startswith("4.8")
-                    or lower.startswith("version")
-                    or lower.startswith("review due")
-                ):
-                    break
+        if "review due" in lower:
+            score -= 50
 
-                if clean:
-                    answer.append(clean)
-
-
-            # after disciplinary sentence captured
-            if (
-                definition_found
-                and "up to and including dismissal" in lower
-            ):
-                answer.append(clean)
-                break
+        if len(sentence) > 40:
+            scored.append((score, sentence))
 
 
-        if answer:
+    scored.sort(
+        key=lambda x: x[0],
+        reverse=True
+    )
 
-            text = " ".join(answer)
+    answer_sentences = []
 
-            text = re.sub(
-                r"\s+",
-                " ",
-                text
-            )
+    for score, sentence in scored:
+        if score >= 5:
+            answer_sentences.append(sentence)
 
-            return text
+        if len(answer_sentences) >= 2:
+            break
 
 
-    return combined_doc[:800]
+    return " ".join(answer_sentences)
 
 # -------------------------------
 # RAG SEARCH
@@ -351,7 +348,10 @@ def ask(data: Question):
             and score >= 2
         ):
             return {
-                "answer": combined_doc[:1200],
+                "answer": build_direct_answer(
+                    question,
+                    combined_doc
+                ),
                 "sources": sources
             }
         
