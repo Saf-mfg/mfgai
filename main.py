@@ -122,39 +122,65 @@ def retrieval_confidence(docs, query):
 
     return score
 
+def clean_sentences(text):
+    text = re.sub(r"\s+", " ", text)
+
+    # remove policy headers
+    text = re.sub(r"POLICY TITLE:.*?(?=4\\.|\\d+\\.|$)", "", text, flags=re.IGNORECASE)
+
+    # split cleanly
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    return [s.strip() for s in sentences if len(s.strip()) > 40]
+
+def extract_definition_block(text):
+    match = re.search(r"4\.1.*?(?=4\.\d+|$)", text, re.DOTALL | re.IGNORECASE)
+    return match.group(0) if match else text
+
 
 # -------------------------------
 # DIRECT ANSWER (NO GEMINI)
 # -------------------------------
 def build_direct_answer(question, combined_doc):
 
+    # STEP 1: isolate definition section
+    definition_text = extract_definition_block(combined_doc)
+
+    # STEP 2: clean + split
+    sentences = clean_sentences(definition_text)
+
     keywords = extract_keywords(question)
-
-    # normalise PDF extraction
-    text = re.sub(r'\s+', ' ', combined_doc)
-
-    sentences = re.split(
-        r'(?<=[.!?])\s+',
-        text
-    )
 
     scored = []
 
-    for sentence in sentences:
+    for i, sentence in enumerate(sentences):
 
         lower = sentence.lower()
         score = 0
 
-        # definition priority
+        # 🚫 remove noise
+        if any(x in lower for x in ["policy title", "version", "review due"]):
+            continue
+
+        # 🎯 definition boost
         if (
             "harassment is" in lower
-            or "means" in lower
             or "defined as" in lower
+            or "means" in lower
             or "refers to" in lower
         ):
             score += 100
 
-        # continuation boost
+            # continuation boost (FIXED i usage)
+            if i > 0 and "harassment is" in sentences[i - 1].lower():
+                score += 40
+
+        # keyword match
+        for keyword in keywords:
+            if keyword in lower:
+                score += 5
+
+        # high-value legal signals
         if "single incident can amount" in lower:
             score += 80
 
@@ -164,42 +190,19 @@ def build_direct_answer(question, combined_doc):
         if "dismissal" in lower:
             score += 20
 
-
-        for keyword in keywords:
-            if keyword in lower:
-                score += 5
-
-        # remove policy metadata/noise
-        if "policy title" in lower:
-            score -= 50
-
-        if "version" in lower:
-            score -= 50
-
-        if "review due" in lower:
-            score -= 50
-
         if len(sentence) > 40:
             scored.append((score, sentence))
 
-
-    scored.sort(
-        key=lambda x: x[0],
-        reverse=True
-    )
+    scored.sort(key=lambda x: x[0], reverse=True)
 
     answer_sentences = []
-
     for score, sentence in scored:
         if score >= 20:
             answer_sentences.append(sentence)
-
         if len(answer_sentences) >= 2:
             break
 
-
     return " ".join(answer_sentences)
-
 # -------------------------------
 # RAG SEARCH
 # -------------------------------
@@ -269,7 +272,8 @@ def search_humhub(query):
     if not policy_chunks:
         return "", [], "", 0, None
 
-    combined_doc = "\n".join(policy_chunks)
+    raw_doc = "\n".join(policy_chunks)
+    combined_doc = extract_definition_block(raw_doc)
     
     if best_policy:
         filtered = [
