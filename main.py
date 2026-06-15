@@ -154,6 +154,17 @@ def build_direct_answer(question, combined_doc):
         ):
             score += 100
 
+        # continuation boost
+        if "single incident can amount" in lower:
+            score += 50
+
+        if "disciplinary procedure" in lower:
+            score += 30
+
+        if "dismissal" in lower:
+            score += 20
+
+
         for keyword in keywords:
             if keyword in lower:
                 score += 5
