@@ -9,7 +9,6 @@ import zipfile
 from fastapi import FastAPI
 from pydantic import BaseModel
 from google import genai
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from rag_db import collection
@@ -21,8 +20,6 @@ load_dotenv()
 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 app = FastAPI()
-
-model = SentenceTransformer("all-MiniLM-L6-v2")
 
 chat_history = {}
 
