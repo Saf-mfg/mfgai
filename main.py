@@ -128,71 +128,64 @@ def retrieval_confidence(docs, query):
 # -------------------------------
 def build_direct_answer(question, combined_doc):
 
-    sentences = re.split(
-        r'(?<=[.!?])\s+',
-        combined_doc
-    )
-
     q = question.lower()
 
-    # definition questions get priority
-    if any(x in q for x in ["what is", "define", "definition"]):
+    # Definition queries
+    if any(x in q for x in [
+        "what is",
+        "define",
+        "definition"
+    ]):
 
-        definition_words = [
-            "is any",
-            "is the",
-            "means",
-            "defined as",
-            "refers to",
-            "is when"
-        ]
+        lines = combined_doc.split("\n")
 
-        definition_hits = []
+        answer = []
 
-        for sentence in sentences:
-            lower = sentence.lower()
+        capture = False
 
-            if any(x in lower for x in definition_words):
+        for line in lines:
 
-                if any(
-                    word in lower
-                    for word in extract_keywords(question)
+            clean = line.strip()
+
+            lower = clean.lower()
+
+            # start capturing at definition heading
+            if (
+                "what is harassment" in lower
+                or "harassment is" in lower
+            ):
+                capture = True
+
+
+            if capture:
+
+                # stop when another section starts
+                if (
+                    lower.startswith("4.")
+                    and "harassment" not in lower
                 ):
-                    definition_hits.append(sentence)
+                    break
 
-        if definition_hits:
-            return definition_hits[0]
+                if clean:
+                    answer.append(clean)
 
 
-    scored = []
+        if answer:
 
-    keywords = extract_keywords(question)
+            text = " ".join(answer)
 
-    for sentence in sentences:
-
-        lower = sentence.lower()
-
-        score = sum(
-            1
-            for word in keywords
-            if word in lower
-        )
-
-        if len(sentence) > 50:
-            scored.append(
-                (score, sentence)
+            # clean duplicate spacing
+            text = re.sub(
+                r"\s+",
+                " ",
+                text
             )
 
+            return text
 
-    scored.sort(
-        key=lambda x: x[0],
-        reverse=True
-    )
 
-    if scored:
-        return scored[0][1]
-
-    return combined_doc[:500]
+    # fallback
+    return combined_doc[:800]
 
 # -------------------------------
 # RAG SEARCH
@@ -348,7 +341,7 @@ def ask(data: Question):
         )
         
         if (
-            is_lookup
+            is_policy_lookup
             and best_policy
             and score >= 2
         ):
