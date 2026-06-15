@@ -130,7 +130,6 @@ def build_direct_answer(question, combined_doc):
 
     q = question.lower()
 
-    # Definition queries
     if any(x in q for x in [
         "what is",
         "define",
@@ -142,27 +141,26 @@ def build_direct_answer(question, combined_doc):
         answer = []
 
         capture = False
+        definition_found = False
 
         for line in lines:
 
             clean = line.strip()
-
             lower = clean.lower()
 
-            # start capturing at definition heading
-            if (
-                "what is harassment" in lower
-                or "harassment is" in lower
-            ):
+            # start at definition
+            if "harassment is any" in lower:
                 capture = True
+                definition_found = True
 
 
             if capture:
 
-                # stop when another section starts
+                # stop when unrelated section starts
                 if (
-                    lower.startswith("4.")
-                    and "harassment" not in lower
+                    lower.startswith("4.8")
+                    or lower.startswith("version")
+                    or lower.startswith("review due")
                 ):
                     break
 
@@ -170,11 +168,19 @@ def build_direct_answer(question, combined_doc):
                     answer.append(clean)
 
 
+            # after disciplinary sentence captured
+            if (
+                definition_found
+                and "up to and including dismissal" in lower
+            ):
+                answer.append(clean)
+                break
+
+
         if answer:
 
             text = " ".join(answer)
 
-            # clean duplicate spacing
             text = re.sub(
                 r"\s+",
                 " ",
@@ -184,7 +190,6 @@ def build_direct_answer(question, combined_doc):
             return text
 
 
-    # fallback
     return combined_doc[:800]
 
 # -------------------------------
