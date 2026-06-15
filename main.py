@@ -147,8 +147,15 @@ def build_direct_answer(
         score = 0
 
         # strong boost for definition-style sentences
-        if any(word in sentence.lower() for word in ["means", "defined", "refers to", "is when", "is the"]):
-            score += 5
+        lower = sentence.lower()
+
+        if (
+            "means" in lower
+            or "defined" in lower
+            or "harassment is" in lower
+            or "harassment means" in lower
+        ):
+            score += 10
 
         # keyword match
         score += sum(
@@ -181,7 +188,7 @@ def build_direct_answer(
         s
         for score, s
         in scored[:2]
-        if score >= 2
+        if score >= 1
     ]
 
     answer = " ".join(
@@ -252,7 +259,10 @@ def search_humhub(query):
     sources = []
     seen_sources = set()
 
-    policy_chunks = []
+    policy_chunks = [
+    doc for doc in policy_chunks
+    if len(doc) > 80
+    ]
 
     for doc, meta in zip(docs, metas):
         if best_policy and meta.get("policy_title") == best_policy:
@@ -262,7 +272,7 @@ def search_humhub(query):
     if not policy_chunks:
         return "", [], "", 0, None
 
-    combined_doc = "\n".join(policy_chunks[:5])
+    combined_doc = "\n".join(policy_chunks)
     
     if best_policy:
         filtered = [
