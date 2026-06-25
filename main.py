@@ -1,7 +1,6 @@
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 import traceback
-import re
 import os
 
 from fastapi import FastAPI
@@ -11,27 +10,35 @@ from google import genai
 
 from rag_db import collection
 
+
 # -------------------------------
 # INIT
 # -------------------------------
+
 load_dotenv()
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+client = genai.Client(
+    api_key=os.getenv("GEMINI_API_KEY")
+)
+
 app = FastAPI()
 
-chat_history = {}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://hub.mfgsolicitors.com"],
+    allow_origins=[
+        "https://hub.mfgsolicitors.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 # -------------------------------
 # REQUEST MODEL
 # -------------------------------
+
 class Question(BaseModel):
     session_id: str
     question: str
@@ -40,6 +47,7 @@ class Question(BaseModel):
 # -------------------------------
 # UTIL
 # -------------------------------
+
 def clean_source(url: str):
     try:
         path = urlparse(url).path
@@ -49,166 +57,165 @@ def clean_source(url: str):
         return url
 
 
-STOP_WORDS = {
-    "what","is","are","the","a","an","how","do","does","can","i",
-    "we","you","of","for","to","please","tell","about"
-}
-
-def extract_keywords(text):
-    words = re.findall(r"\w+", text.lower())
-    return {
-        w for w in words
-        if len(w) > 2 and w not in STOP_WORDS
-    }
-
-
-def is_definition_question(q: str):
-    q = q.lower()
-    return any(x in q for x in ["what is", "define", "meaning of"])
-
-
-def clean_sentences(text):
-    text = re.sub(r"\s+", " ", text)
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    return [s.strip() for s in sentences if len(s.strip()) > 30]
-
-
 # -------------------------------
 # GEMINI
 # -------------------------------
-def safe_generate_content(prompt):
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
-        return response.text
-    except Exception as e:
-        print("GEMINI ERROR:", repr(e))
-        return "AI temporarily unavailable."
 
+def ask_gemini(question, context):
 
-# -------------------------------
-# RAG RETRIEVAL (CLEAN + CORRECT)
-# -------------------------------
-def retrieve_context(query: str):
-    results = collection.query(
-        query_texts=[query],
-        n_results=10,
-        include=["documents", "metadatas"]
+    prompt = f"""
+You are an internal company policy assistant.
+
+Answer the user's question using ONLY the policy context provided.
+
+Rules:
+- Do not invent policies.
+- Do not use outside knowledge.
+- If the context does not contain the answer, say:
+  "I could not find relevant information in the company policies."
+- Give a clear, helpful explanation.
+- Mention relevant policy names when possible.
+
+POLICY CONTEXT:
+{context}
+
+USER QUESTION:
+{question}
+"""
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
     )
 
-    docs = results.get("documents", [[]])[0]
-    metas = results.get("metadatas", [[]])[0]
-
-    if not docs:
-        return [], []
-
-    # Chroma already does semantic ranking → just use top results
-    top_docs = docs[:5]
-    top_metas = metas[:5]
-
-    return top_docs, top_metas
+    return response.text
 
 
 # -------------------------------
-# DIRECT ANSWER BUILDER
+# RAG RETRIEVAL
 # -------------------------------
-def build_direct_answer(question, context):
-    sentences = clean_sentences(context)
-    keywords = extract_keywords(question)
 
-    scored = []
+def retrieve_context(query):
 
-    for s in sentences:
-        score = 0
-        lower = s.lower()
+    results = collection.query(
+        query_texts=[query],
+        n_results=5,
+        include=[
+            "documents",
+            "metadatas"
+        ]
+    )
 
-        if any(x in lower for x in [
-            "is defined as",
-            "means",
-            "refers to",
-            "definition"
-        ]):
-            score += 50
+    docs = results.get(
+        "documents",
+        [[]]
+    )[0]
 
-        for k in keywords:
-            if k in lower:
-                score += 5
+    metas = results.get(
+        "metadatas",
+        [[]]
+    )[0]
 
-        scored.append((score, s))
-
-    scored.sort(reverse=True, key=lambda x: x[0])
-
-    return " ".join([s for _, s in scored[:3]])
+    return docs, metas
 
 
 # -------------------------------
 # MAIN ENDPOINT
 # -------------------------------
+
 @app.post("/ask")
 def ask(data: Question):
+
     try:
+
         question = data.question
 
+
         # -------------------------------
-        # RETRIEVE
+        # GET RELEVANT POLICY CHUNKS
         # -------------------------------
+
         docs, metas = retrieve_context(question)
-        context = "\n\n".join(docs[:4])
+
+
+        if not docs:
+
+            return {
+                "answer": "I could not find relevant information in the company policies.",
+                "sources": []
+            }
+
+
+        context = "\n\n".join(
+            docs
+        )
+
 
         # -------------------------------
-        # DIRECT MODE
+        # GEMINI REASONING
         # -------------------------------
-        if len(question.split()) <= 6 or is_definition_question(question):
-            if context:
-                return {
-                    "answer": build_direct_answer(question, context),
-                    "sources": [
-                        {
-                            "title": clean_source(m.get("wiki_page", "")),
-                            "url": m.get("wiki_page", "")
-                        }
-                        for m in metas[:3]
-                    ]
-                }
+
+        try:
+
+            answer = ask_gemini(
+                question,
+                context
+            )
+
+        except Exception as e:
+
+            print(
+                "GEMINI ERROR:",
+                repr(e)
+            )
+
+            # fallback: still return retrieved policies
+            return {
+                "answer": (
+                    "I found relevant policy information, "
+                    "but the AI response service is temporarily unavailable. "
+                    "Please review the sources below."
+                ),
+                "sources": [
+                    {
+                        "title": clean_source(
+                            m.get("wiki_page", "")
+                        ),
+                        "url": m.get("wiki_page", "")
+                    }
+                    for m in metas[:5]
+                ]
+            }
+
 
         # -------------------------------
-        # GEMINI FALLBACK
+        # RESPONSE
         # -------------------------------
-        prompt = f"""
-You are a strict internal policy assistant.
-
-ONLY use the context below.
-
-If the answer is not in context, say:
-"I could not find relevant information in the company policies."
-
-CONTEXT:
-{context}
-
-QUESTION:
-{question}
-"""
-
-        answer = safe_generate_content(prompt)
 
         return {
             "answer": answer,
             "sources": [
                 {
-                    "title": clean_source(m.get("wiki_page", "")),
+                    "title": clean_source(
+                        m.get("wiki_page", "")
+                    ),
                     "url": m.get("wiki_page", "")
                 }
-                for m in metas[:3]
+                for m in metas[:5]
             ]
         }
 
+
     except Exception as e:
-        print("ERROR:", repr(e))
+
+        print(
+            "SERVER ERROR:",
+            repr(e)
+        )
+
         traceback.print_exc()
 
         return {
-            "answer": "Internal server error",
+            "answer": "Something went wrong processing your request.",
             "sources": []
         }
